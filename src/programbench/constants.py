@@ -12,7 +12,12 @@ from typing import Any
 
 DOCKER_EXECUTABLE = os.environ.get("PROGRAMBENCH_DOCKER_EXECUTABLE", "docker")
 DOCKER_CPUS = int(os.environ.get("PROGRAMBENCH_DOCKER_CPUS", "6"))
-DOCKER_RUN_ARGS: list[str] = ["--memory", "60g", "--memory-swap", "60g", "--pids-limit", "2048"]
+# Memory cap per container. Overridable for shared/rootless hosts where 60g is
+# unavailable: set PROGRAMBENCH_DOCKER_MEMORY (e.g. "16g"), or "" to drop the cap.
+DOCKER_MEMORY = os.environ.get("PROGRAMBENCH_DOCKER_MEMORY", "60g")
+DOCKER_RUN_ARGS: list[str] = (
+    ["--memory", DOCKER_MEMORY, "--memory-swap", DOCKER_MEMORY] if DOCKER_MEMORY else []
+) + ["--pids-limit", "2048"]
 
 # Network posture per container role. Deliberately not folded into
 # DOCKER_RUN_ARGS: mutant and reference builds share that list and still resolve
