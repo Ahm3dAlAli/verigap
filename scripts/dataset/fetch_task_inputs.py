@@ -23,6 +23,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from programbench.constants import DOCKER_EXECUTABLE
 from programbench.utils.ground_truth_store import (
     download_implementation_archive,
     extract_implementation,
@@ -62,15 +63,17 @@ def fetch_ground_truth(task: str, source: str, root: Path) -> None:
 def fetch_cleanroom(task: str, root: Path) -> None:
     target = root / task
     if not _has_entries(target):
+        # Honor PROGRAMBENCH_DOCKER_EXECUTABLE (e.g. "podman") like the rest of the harness.
+        docker = DOCKER_EXECUTABLE
         image = f"programbench/{task.replace('__', '_1776_')}:task_cleanroom"
-        subprocess.run(["docker", "pull", "--quiet", image], check=True, stdout=subprocess.DEVNULL)
-        container = subprocess.run(["docker", "create", image], check=True, capture_output=True, text=True).stdout.strip()
+        subprocess.run([docker, "pull", "--quiet", image], check=True, stdout=subprocess.DEVNULL)
+        container = subprocess.run([docker, "create", image], check=True, capture_output=True, text=True).stdout.strip()
         root.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix=f".{task}.", dir=root))
         try:
-            subprocess.run(["docker", "cp", f"{container}:/workspace/.", str(staging / task)], check=True)
+            subprocess.run([docker, "cp", f"{container}:/workspace/.", str(staging / task)], check=True)
         finally:
-            subprocess.run(["docker", "rm", container], check=False, capture_output=True)
+            subprocess.run([docker, "rm", container], check=False, capture_output=True)
         (staging / task).replace(target)
         staging.rmdir()
     # Task images may contain execute-only ./executable files; host tar must
