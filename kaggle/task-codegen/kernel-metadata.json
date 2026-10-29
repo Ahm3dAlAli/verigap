@@ -1,0 +1,1 @@
+{ "id": "archie40004/verigap-codegen", "title": "VeriGap Codegen", "code_file": "task.py", "language": "python", "kernel_type": "notebook", "is_private": true, "enable_gpu": false, "enable_internet": true, "dataset_sources": ["archie40004/verigap-specs","archie40004/verigap-data"], "competition_sources": [], "kernel_sources": [] }
