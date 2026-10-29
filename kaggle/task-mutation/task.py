@@ -90,7 +90,7 @@ def generate_suite(llm, spec):
 INSTRUCTIONS = 'You are creating a test suite.\n\n## Task\n\nCreate a comprehensive test suite under `eval/`.\n\n## Evaluation Design\n\n- The suite is evaluated against fresh workspaces containing the program under test at `/workspace/executable`.\n- The specification is available only now, while authoring the suite.\n- Tests must invoke `/workspace/executable` (absolute path).\n\n## Rules\n\n- Cover documented functional behavior thoroughly. The suite must kill mutants that violate the spec, while passing any implementation that follows the spec.\n- Cover each explicitly numbered/sectioned requirement with at least one focused test. Prefer many small tests over one huge test.\n\n## Output\n\nReturn a list of files. Exactly one must be `eval/run.sh` (executable), plus any test files it needs.\n- `eval/run.sh` must always write valid JUnit XML to `/workspace/eval/results.xml`.\n- It must run the whole suite even after individual failures.\n- Root `<testsuites>` (or a single `<testsuite>`), one named `<testcase>` per test; non-pass outcomes use nested `<failure>`/`<error>`/`<skipped>`.\n- For pytest: `cd /workspace/eval && pytest --junitxml=/workspace/eval/results.xml`.\n'
 
 # %%
-@kbench.task(name='verigap-mutation-v3',
+@kbench.task(name='verigap-mutation-v4',
     description='Spec-driven test generation scored by mutation kill rate.')
 def verigap_mutation_score(llm, task: str, spec: str) -> float:
     root = generate_suite(llm, spec)
