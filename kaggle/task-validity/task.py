@@ -24,10 +24,14 @@ def fetch_reference(task):
     impl = Path(snapshot_download('eth-sri/tsb-reference_impl', repo_type='dataset', allow_patterns=f'executable/{task}/**'))
     ref = impl/'executable'/task/'executable'; ref.chmod(0o755); return ref
 
-def fetch_mutants(task):
-    root = Path(snapshot_download('eth-sri/tsb-mutants', repo_type='dataset', allow_patterns=f'{task}/**'))/task
+def fetch_manifest(task):
+    root = Path(snapshot_download('eth-sri/tsb-mutants', repo_type='dataset', allow_patterns=f'{task}/mutants.json'))/task
     man = json.loads((root/'mutants.json').read_text())
     return root, (man['mutants'] if isinstance(man, dict) else man)
+
+def fetch_one_mutant(task, m):
+    want = (m.get('artifact') or {}).get('path') or m['payload']
+    snapshot_download('eth-sri/tsb-mutants', repo_type='dataset', allow_patterns=f'{task}/{want}')
 
 def materialize_mutant(root, m):
     p = root/m['payload']
@@ -45,7 +49,7 @@ def run_against(exe, suite_root):
     shutil.copy2(exe, WS/'executable'); (WS/'executable').chmod(0o755)
     for item in suite_root.iterdir():
         (shutil.copytree if item.is_dir() else shutil.copy2)(item, WS/item.name)
-    try: subprocess.run(['bash','eval/run.sh'], cwd=WS, capture_output=True, text=True, timeout=1800)
+    try: subprocess.run(['bash','eval/run.sh'], cwd=WS, capture_output=True, text=True, timeout=45)
     except subprocess.TimeoutExpired: pass
     res = WS/'eval'/'results.xml'; out = {}
     if res.is_file():
@@ -67,14 +71,21 @@ def _field(obj, key):
     return getattr(obj, key) if hasattr(obj, key) else obj[key]
 
 def generate_suite(llm, spec):
-    suite = llm.prompt(INSTRUCTIONS + '\n\n## Specification\n\n' + spec, schema=GeneratedSuite)
-    files = _field(suite, 'files')
-    root = Path(tempfile.mkdtemp())/'suite'; root.mkdir(parents=True)
-    for f in files:
-        rel = _field(f, 'path').lstrip('/'); p = root/rel
-        p.parent.mkdir(parents=True, exist_ok=True); p.write_text(_field(f, 'content'))
-        if p.name == 'run.sh': p.chmod(0o755)
-    return root
+    prompt = INSTRUCTIONS + '\n\n## Specification\n\n' + spec
+    last = None
+    for _ in range(3):   # structured-output generation can fail stochastically; retry
+        try:
+            suite = llm.prompt(prompt, schema=GeneratedSuite)
+            files = _field(suite, 'files')
+            root = Path(tempfile.mkdtemp())/'suite'; root.mkdir(parents=True)
+            for f in files:
+                rel = _field(f, 'path').lstrip('/'); p = root/rel
+                p.parent.mkdir(parents=True, exist_ok=True); p.write_text(_field(f, 'content'))
+                if p.name == 'run.sh': p.chmod(0o755)
+            return root
+        except Exception as e:
+            last = e
+    raise last
 
 INSTRUCTIONS = 'You are creating a test suite.\n\n## Task\n\nCreate a comprehensive test suite under `eval/`.\n\n## Evaluation Design\n\n- The suite is evaluated against fresh workspaces containing the program under test at `/workspace/executable`.\n- The specification is available only now, while authoring the suite.\n- Tests must invoke `/workspace/executable` (absolute path).\n\n## Rules\n\n- Cover documented functional behavior thoroughly. The suite must kill mutants that violate the spec, while passing any implementation that follows the spec.\n- Cover each explicitly numbered/sectioned requirement with at least one focused test. Prefer many small tests over one huge test.\n\n## Output\n\nReturn a list of files. Exactly one must be `eval/run.sh` (executable), plus any test files it needs.\n- `eval/run.sh` must always write valid JUnit XML to `/workspace/eval/results.xml`.\n- It must run the whole suite even after individual failures.\n- Root `<testsuites>` (or a single `<testsuite>`), one named `<testcase>` per test; non-pass outcomes use nested `<failure>`/`<error>`/`<skipped>`.\n- For pytest: `cd /workspace/eval && pytest --junitxml=/workspace/eval/results.xml`.\n'
 
@@ -91,14 +102,17 @@ def verigap_validity(llm, task: str, spec: str) -> float:
     return passed/len(out)
 
 # %%
-# Spec loads from the Kaggle dataset (verigap-specs) when pushed, or the local
-# repo when validating with `python task.py` from the repo root.
+# Spec loads from the attached verigap-specs dataset (wherever Kaggle mounts it),
+# or the local repo when validating with `python task.py` from the repo root.
+import glob as _glob
 def load_spec(task_id):
-    k = Path('/kaggle/input/verigap-specs') / f'{task_id}.md'
-    if k.exists(): return k.read_text()
-    local = Path('ground_truth/spec') / task_id / 'spec.md'
-    if local.exists(): return local.read_text()
-    raise FileNotFoundError("spec not found: attach 'verigap-specs' (Kaggle) or run from the repo root")
+    cands = [f'/kaggle/input/verigap-specs/{task_id}.md']
+    cands += _glob.glob(f'/kaggle/input/**/{task_id}.md', recursive=True)
+    cands += [f'ground_truth/spec/{task_id}/spec.md']
+    for c in cands:
+        if Path(c).exists(): return Path(c).read_text()
+    listing = os.listdir('/kaggle/input') if os.path.isdir('/kaggle/input') else 'NO /kaggle/input'
+    raise FileNotFoundError(f'spec {task_id} not found. /kaggle/input contains: {listing}')
 
 task_id = 'abishekvashok__cmatrix.5c082c6'
 verigap_validity.run(kbench.llm, task=task_id, spec=load_spec(task_id))
